@@ -1,0 +1,51 @@
+name: Reusable Docker Build
+
+# Объявляем, что этот воркфлоу можно вызывать из других репозиториев (workflow_call)
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        required: true
+        type: string
+        description: "Имя Docker-образа (например, inv-backend)"
+      context_dir:
+        required: false
+        type: string
+        default: "."
+        description: "Директория для сборки (где лежит Dockerfile)"
+    secrets:
+      REGISTRY_TOKEN:
+        required: true
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.REGISTRY_TOKEN }}
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          # Образ будет называться: ghcr.io/inventory-proj/inv-backend
+          images: ghcr.io/${{ github.repository_owner }}/${{ inputs.image_name }}
+          # Генерируем теги: latest для ветки main и тег с хэшем коммита
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ inputs.context_dir }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
