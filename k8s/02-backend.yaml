@@ -20,15 +20,21 @@ spec:
           imagePullPolicy: Always
           env:
             - name: POSTGRES_USER
-              value: "admin"
-            - name: POSTGRES_PASSWORD
-              value: "secure_inventory_pass" # Пароль должен совпадать с паролем из 01-db.yaml
+              value: "administrator" # Твой юзер из .env
             - name: POSTGRES_DB
-              value: "inventory"
+              value: "inventory"     # Твоя БД из .env
             - name: DB_HOST
-              value: "db" # Внутреннее DNS-имя сервиса базы данных внутри K8s
+              value: "db"            # Имя сервиса базы внутри K8s (вместо localhost)
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: database-password
             - name: SECRET_KEY
-              value: "super_secret_jwt_key_prod" # Сгенерируй свой ключ для JWT-токенов
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: jwt-secret-key
           ports:
             - containerPort: 8000
 ---
