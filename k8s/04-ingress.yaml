@@ -4,7 +4,14 @@ metadata:
   name: inventory-ingress
   annotations:
     kubernetes.io/ingress.class: "traefik"
+    # Эта строчка заставит cert-manager выпустить сертификат
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
 spec:
+  # Этот блок включает HTTPS-шифрование для домена
+  tls:
+    - hosts:
+        - inv.e-laba52.ru
+      secretName: inventory-tls-secret
   rules:
     - host: inv.e-laba52.ru
       http:
