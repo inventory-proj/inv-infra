@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: db-init-script
+data:
+  init.sh: |
+    #!/bin/bash
+    set -e
+    psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<-EOSQL
+        CREATE TABLE IF NOT EXISTS roles (
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(50) UNIQUE NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,
+            username VARCHAR(50) UNIQUE NOT NULL,
+            password VARCHAR(255) NOT NULL,
+            role_id INTEGER REFERENCES roles(id)
+        );
+        CREATE TABLE IF NOT EXISTS servers (
+            id SERIAL PRIMARY KEY,
+            hostname VARCHAR(100) NOT NULL,
+            ip_address VARCHAR(50) NOT NULL,
+            cluster_id INTEGER,
+            status VARCHAR(20) DEFAULT 'active'
+        );
+        INSERT INTO roles (id, name) VALUES (1, 'admin'), (2, 'devops'), (3, 'viewer') ON CONFLICT (id) DO NOTHING;
+        -- Внедряем пароль безопасно из памяти K8s:
+        INSERT INTO users (username, password, role_id)
+        VALUES ('administrator', '${ADMIN_WEB_PASSWORD}', 1)
+        ON CONFLICT (username) DO NOTHING;
+    EOSQL

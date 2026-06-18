@@ -28,10 +28,15 @@ spec:
           image: postgres:15-alpine
           env:
             - name: POSTGRES_USER
-              value: "administrator" # Твой юзер из .env
+              value: "administrator"
             - name: POSTGRES_DB
-              value: "inventory"     # Твоя БД из .env
+              value: "inventory"
             - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: backend-secrets
+                  key: database-password
+            - name: ADMIN_WEB_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: backend-secrets
@@ -41,15 +46,20 @@ spec:
           volumeMounts:
             - name: pgdata
               mountPath: /var/lib/postgresql/data
+            - name: init-script
+              mountPath: /docker-entrypoint-initdb.d
       volumes:
         - name: pgdata
           persistentVolumeClaim:
             claimName: postgres-pvc
+        - name: init-script
+          configMap:
+            name: db-init-script
 ---
 apiVersion: v1
 kind: Service
 metadata:
-  name: db # Это имя заменяет localhost для бэкенда
+  name: db
 spec:
   ports:
     - port: 5432
