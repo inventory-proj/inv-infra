@@ -6,78 +6,111 @@ data:
   init.sh: |
     #!/bin/bash
     set -e
+    
     psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<EOSQL
     CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
     CREATE TABLE IF NOT EXISTS roles (
         id SERIAL PRIMARY KEY,
         role_name VARCHAR(50) UNIQUE NOT NULL
     );
+
     CREATE TABLE IF NOT EXISTS users (
         id SERIAL PRIMARY KEY,
         username VARCHAR(50) UNIQUE NOT NULL,
         password_hash VARCHAR(255) NOT NULL,
         role_id INT REFERENCES roles(id)
     );
+
+    -- НОВЫЕ ТАБЛИЦЫ ДЛЯ SAAS (ГРУППЫ И ТОКЕНЫ)
+    CREATE TABLE IF NOT EXISTS workspaces (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        owner_id INT REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS workspace_members (
+        workspace_id INT REFERENCES workspaces(id) ON DELETE CASCADE,
+        user_id INT REFERENCES users(id) ON DELETE CASCADE,
+        PRIMARY KEY (workspace_id, user_id)
+    );
+
     CREATE TABLE IF NOT EXISTS environments (
         id SERIAL PRIMARY KEY,
-        env_name VARCHAR(50) UNIQUE NOT NULL
+        env_name VARCHAR(50) UNIQUE NOT NULL,
+        workspace_id INT REFERENCES workspaces(id) ON DELETE CASCADE
     );
+
     CREATE TABLE IF NOT EXISTS clusters (
         id SERIAL PRIMARY KEY,
         cluster_name VARCHAR(100) UNIQUE NOT NULL,
-        env_id INT REFERENCES environments(id)
+        env_id INT REFERENCES environments(id) ON DELETE CASCADE
     );
+
     CREATE TABLE IF NOT EXISTS servers (
         id SERIAL PRIMARY KEY,
-        hostname VARCHAR(100) UNIQUE NOT NULL,
+        hostname VARCHAR(100) NOT NULL,
         ip_address INET NOT NULL,
-        cluster_id INT REFERENCES clusters(id),
-        status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'offline', 'maintenance', 'archived'))
+        cluster_id INT REFERENCES clusters(id) ON DELETE SET NULL,
+        workspace_id INT REFERENCES workspaces(id) ON DELETE CASCADE,
+        agent_token UUID DEFAULT gen_random_uuid() UNIQUE,
+        status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'offline', 'maintenance', 'archived')),
+        UNIQUE (hostname, workspace_id)
     );
+
     CREATE TABLE IF NOT EXISTS containers (
         id SERIAL PRIMARY KEY,
         container_name VARCHAR(100) NOT NULL,
         image_name VARCHAR(100) NOT NULL,
-        server_id INT REFERENCES servers(id),
+        server_id INT REFERENCES servers(id) ON DELETE CASCADE,
         is_running BOOLEAN DEFAULT TRUE
     );
+
     CREATE TABLE IF NOT EXISTS incidents (
         id SERIAL PRIMARY KEY,
-        server_id INT REFERENCES servers(id),
+        server_id INT REFERENCES servers(id) ON DELETE CASCADE,
         reporter_id INT REFERENCES users(id),
         description TEXT NOT NULL,
         status VARCHAR(20) DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'resolved')),
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
+
     CREATE TABLE IF NOT EXISTS incident_logs (
         id SERIAL PRIMARY KEY,
-        incident_id INT REFERENCES incidents(id),
+        incident_id INT REFERENCES incidents(id) ON DELETE CASCADE,
         old_status VARCHAR(20),
         new_status VARCHAR(20),
         change_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
-    CREATE OR REPLACE FUNCTION log_incident_status_change()
+
+    CREATE OR REPLACE FUNCTION log_incident_status_change() 
     RETURNS TRIGGER AS \$\$
     BEGIN
         IF OLD.status != NEW.status THEN
-            INSERT INTO incident_logs (incident_id, old_status, new_status)
+            INSERT INTO incident_logs (incident_id, old_status, new_status) 
             VALUES (NEW.id, OLD.status, NEW.status);
         END IF;
-        RETURN NEW;
+        RETURN NEW; 
     END;
     \$\$ LANGUAGE plpgsql;
-    CREATE OR REPLACE TRIGGER trigger_log_incident_status
+
+    CREATE OR REPLACE TRIGGER trigger_log_incident_status 
     AFTER UPDATE ON incidents
     FOR EACH ROW EXECUTE FUNCTION log_incident_status_change();
-    CREATE OR REPLACE PROCEDURE enable_maintenance(p_server_id INT)
+
+    CREATE OR REPLACE PROCEDURE enable_maintenance(p_server_id INT) 
     LANGUAGE plpgsql AS \$\$
     BEGIN
         UPDATE servers SET status = 'maintenance' WHERE id = p_server_id;
         UPDATE containers SET is_running = FALSE WHERE server_id = p_server_id;
     END;
     \$\$;
-    INSERT INTO roles (id, role_name) VALUES (1, 'admin'), (2, 'devops'), (3, 'viewer') ON CONFLICT (id) DO NOTHING;
-    INSERT INTO users (username, password_hash, role_id)
-    VALUES ('administrator', crypt('${ADMIN_WEB_PASSWORD}', gen_salt('bf')), 1)
+
+    -- ИНИЦИАЛИЗАЦИЯ
+    INSERT INTO roles (id, role_name) VALUES (1, 'global_admin'), (2, 'tenant_admin'), (3, 'viewer') ON CONFLICT (id) DO NOTHING;
+    
+    INSERT INTO users (username, password_hash, role_id) 
+    VALUES ('administrator', crypt('${ADMIN_WEB_PASSWORD}', gen_salt('bf')), 1) 
     ON CONFLICT (username) DO NOTHING;
     EOSQL
