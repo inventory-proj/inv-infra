@@ -1,0 +1,24 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: loki-ingress
+  annotations:
+    kubernetes.io/ingress.class: "traefik"
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+    - hosts:
+        - logs.inv.e-laba52.ru
+      secretName: loki-tls-secret
+  rules:
+    - host: logs.inv.e-laba52.ru
+      http:
+        paths:
+          # Открываем ТОЛЬКО эндпоинт для пуша (записи) логов
+          - path: /loki/api/v1/push
+            pathType: Prefix
+            backend:
+              service:
+                name: loki-service
+                port:
+                  number: 3100
